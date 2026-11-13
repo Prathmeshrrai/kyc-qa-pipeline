@@ -8,3 +8,7 @@
 - GitHub's web editor works for docs; code needs a local clone.
 **Mistake and fix:** [None today]
 **Tomorrow:** Write KYC rules (statuses, document formats, tiers).
+## 13 Nov 2026
+- Watched Java Strings lectures (String immutability, StringBuilder, StringBuffer)
+- Ran a basic Java program in Eclipse
+- Created docs/01-risk-list.md with the first 7 KYC risks (priorities to be filled)
