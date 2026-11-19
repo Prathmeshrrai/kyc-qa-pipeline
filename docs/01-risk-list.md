@@ -1,18 +1,46 @@
-# KYC Risk List
+# KYC Risk-Based Test Cases
 
-Risk-based test design for the KYC onboarding project. Higher-priority risks are tested first.
+Each test case is linked to a risk from `01-risk-list.md`. Priority decides the order of execution.
 
-| ID | KYC risk | Example | Impact | Priority |
-|----|----------|---------|--------|----------|
-| R1 | Name spelling mismatch across documents | PAN says "Prathmesh", Aadhaar says "Prathamesh" | | |
-| R2 | Duplicate customer | Same person registers twice with different emails | | |
-| R3 | Expired document | Passport or ID past its expiry date is accepted | | |
-| R4 | Wrong document-number format | PAN with 9 characters accepted | | |
-| R5 | Too many verification attempts | Unlimited retries with wrong details | | |
-| R6 | Resubmission after rejection | Rejected customer resubmits and gets approved without a re-check | | |
-| R7 | Personal data exposed in logs or responses | Full document number shown in API response or log | | |
+**Updated to match API_CONTRACT.md.** The last column shows what changed and why. Original assumptions: endpoints such as `POST /api/customers`, `POST /api/customers/{id}/documents`, `POST /api/customers/{id}/verify`, `GET /api/customers/{id}/status`, `POST /api/transfers`, and JWT login. Business rules such as how many attempts are allowed and how names are matched are assumptions until the app's rules are written down.
 
-## What I will test first and why
-1.
-2.
-3.
+| ID | Risk | Title | Test data | Steps | Expected result | Type | Priority | Result | Changed? |
+|---|---|---|---|---|---|---|---|---|---|
+| TC-01 | R1 | Names match exactly | PAN name = Aadhaar name = registration name | Register, submit both documents, verify | Status moves to APPROVED | API | High | Not run | No |
+| TC-02 | R1 | One-letter spelling difference | Registration 'Prathmesh Rai', PAN 'Prathamesh Rai' | Submit documents and verify | Rejected. Status = REJECTED, attempts = 1, reasons contains 'PAN: NAME_MISMATCH'. Not approved | API | High | Not run | Yes: a mismatch is REJECTED here, not manual review (rule 6, 7) |
+| TC-03 | R1 | Completely different name | Registration 'Prathmesh Rai', PAN 'Rohan Shah' | Submit documents and verify | Status = REJECTED, attempts = 1, reasons contains 'PAN: NAME_MISMATCH' | API | High | Not run | Yes: exact reason text added |
+| TC-04 | R1 | Name order swapped | Registration 'Prathmesh Rai', PAN 'Rai Prathmesh' | Submit and verify | Status = REJECTED with NAME_MISMATCH (full name must equal, order matters) | API | Medium | Not run | Yes: rule 6 says the full name must equal |
+| TC-05 | R1 | Middle name or initial added | Registration 'Prathmesh Rai', PAN 'Prathmesh K Rai' | Submit and verify | Status = REJECTED with NAME_MISMATCH (a middle initial makes the names different) | API | Medium | Not run | Yes: rule 6 says the full name must equal |
+| TC-06 | R1 | Case and extra spaces | Registration 'prathmesh  RAI', PAN 'PRATHMESH RAI' | Submit and verify | Treated as a match. Status = APPROVED | API | Low | Not run | Yes: expected result made exact |
+| TC-07 | R2 | Same PAN registered twice | Customer A already has PAN ABCDE1234F | Register customer B with the same PAN | 409 Conflict (or equivalent). No second customer created | API | High | Not run | No |
+| TC-08 | R2 | Same mobile number, different case of email | Customer A mobile 9876543210 | Register B with the same mobile and a new email | Rejected as duplicate | API | High | Not run | No |
+| TC-09 | R2 | Same email with different case and spaces | Customer A 'a@x.com' | Register 'A@X.com ' (trailing space) | Rejected as duplicate | API | Medium | Not run | No |
+| TC-10 | R2 | Same document number, different name | Customer A holds Aadhaar 1234 5678 9012 | Customer B submits the same Aadhaar with another name | 409 Conflict on the second submission. Aadhaar is not stored for customer B | API | High | Not run | Yes: rule 3 says 409, not 'flagged for review' |
+| TC-11 | R3 | Document expired yesterday | Passport expiry = yesterday | Submit document | 400 with error 'Document expired' | API | High | Not run | Yes: rule 5, exact code |
+| TC-12 | R3 | Document expires today (boundary) | Passport expiry = today | Submit document | Accepted with 200. A passport is valid through its expiry date (rule 5) | API | High | Not run | Yes: rule 5 defines today as valid |
+| TC-13 | R3 | Document valid for 6 months | Passport expiry = today + 6 months | Submit document | Accepted with 200 | API | Medium | Not run | Yes: exact code |
+| TC-14 | R3 | Invalid expiry date format | Expiry = '31-31-2030' | Submit document | 400 Bad Request with a clear field error | API | Low | Not run | No |
+| TC-15 | R4 | Valid PAN format | ABCDE1234F, the same PAN used at registration | Submit | Accepted with 200, numberMasked = XXXXXX234F | API | Medium | Not run | Yes: the PAN must equal the registered PAN (rule 4) |
+| TC-16 | R4 | PAN with 9 characters | ABCDE123F | Submit | 400, format error | API | Medium | Not run | No |
+| TC-17 | R4 | PAN in lowercase | abcde1234f | Submit | 400 Invalid PAN format. Lowercase is not accepted | API | Low | Not run | Yes: rule 4, no automatic normalising |
+| TC-18 | R4 | Aadhaar with 11 digits | 23456789012 (11 digits, first digit 2 to 9, so length is the only problem) | Submit | 400 Invalid Aadhaar format | API | Medium | Not run | Yes: test data changed so only ONE thing is wrong (always change one thing at a time) |
+| TC-19 | R4 | Aadhaar with letters | 12345678ABCD | Submit | 400, format error | API | Medium | Not run | No |
+| TC-20 | R4 | SQL injection in document number | Type PAN, number ' OR '1'='1 | Submit | 400. No data returned, no server error, nothing stored | API | High | Not run | Yes: type specified |
+| TC-21 | R5 | Account locks on the 3rd wrong attempt | New customer, wrong details each time | Verify with wrong details. Resubmit the wrong document. Verify again. Repeat until the 3rd verify | 1st and 2nd failed verify: status REJECTED (attempts 1, 2). 3rd failed verify: status LOCKED (attempts 3) | API | High | Not run | Yes: rule 8 locks after the 3rd failed attempt; rule 9 says resubmit before verifying again |
+| TC-22 | R5 | Fourth wrong attempt blocked | Customer in status LOCKED | Call verify and documents again | 423 Locked on both calls. Nothing is processed | API | High | Not run | Yes: lock happens at the 3rd failure (rule 8), so this test checks the locked state |
+| TC-23 | R5 | Verify after APPROVED | Customer already APPROVED | Call verify again | 409 Conflict, status stays APPROVED | API | Medium | Not run | Yes: this app has no counter reset (rule 7, 8) |
+| TC-24 | R6 | Corrected resubmission after rejection | Customer REJECTED because the PAN name does not match the registered name | Submit the PAN document again with the correct name, check status, then verify | After submitting: status = PENDING. After verify: status = APPROVED | API | High | Not run | Yes: an expired passport is rejected on submission (400) so it cannot cause REJECTED status |
+| TC-25 | R6 | Same rejected document resubmitted | Customer REJECTED | Resubmit the identical document | Status goes to PENDING. Verify again returns REJECTED, attempts goes up by 1. Never approved | API | High | Not run | Yes: exact behaviour |
+| TC-26 | R6 | Direct status jump to APPROVED | Customer REJECTED | As a customer, call the review endpoint (POST /api/customers/{id}/review) | 403 Forbidden. Status stays REJECTED | API | High | Not run | Yes: officers may approve by design (rule 13), so test it as a customer |
+| TC-27 | R7 | Document number masked in response | Customer with a PAN, an Aadhaar and a passport document | GET /api/customers/{id} and check EVERY document number | Every number shows X characters except the last 4 (for example XXXXXX234F for the PAN). Full number never returned | API | High | Not run | Yes: check every document type, not just the PAN |
+| TC-28 | R7 | No full document number in logs | Run the registration and verification flow | Search the application log for the full number | Full number does not appear in logs | API | High | Not run | No |
+| TC-29 | R7 | Error messages do not echo personal data | Send an invalid request containing a PAN | Read the error body | Error text does not repeat the PAN or other personal data | API | Medium | Not run | No |
+| TC-30 | AUTH | No token | None | Call a protected endpoint without a token | 401 Unauthorized | API | High | Not run | No |
+| TC-31 | AUTH | Invalid token | A made-up token string | Call a protected endpoint with the made-up token | 401 Unauthorized | API | High | Not run | Yes: this app tokens do not expire (rule 11), so an invalid token is tested instead |
+| TC-32 | AUTH | Customer reads another customer's record | Customer A logged in, customer B's id known | GET B's record with A's token. Test BOTH /api/customers/{id} and /api/customers/{id}/status | 403 Forbidden on both (no data from B) | API | High | Not run | Yes: two endpoints to cover |
+| TC-33 | AUTH | Customer calls an officer-only endpoint | Customer token | Call POST /api/customers/{id}/review with a customer token | 403 Forbidden | API | High | Not run | Yes: endpoint named |
+| TC-34 | TIER | Transfer exactly at the tier limit | Customer APPROVED with a PAN document only (TIER1, limit 50,000) | Transfer 50000 | 201 Created, status COMPLETED | API | Medium | Not run | Yes: limit value from rule 12 |
+| TC-35 | TIER | Transfer one unit above the limit | Customer APPROVED with a PAN document only (TIER1, limit 50,000) | Transfer 50001 | 422 Amount exceeds tier limit | API | High | Not run | Yes: limit value from rule 12 |
+| TC-36 | TIER | Pending or rejected customer transfers | Status PENDING or REJECTED | Attempt a transfer | 403 Customer is not approved | API | High | Not run | Yes: exact code |
+| TC-37 | UI | Registration form shows clear errors (N/A for this app) | Open the registration page | Submit with required fields empty | Not applicable now: this app has no UI. Keep it for the Selenium stage | UI | Medium | Not run | Yes: no UI in the practice app |
+| TC-38 | UI | Status page shows the right status (N/A for this app) | Customer in each state | Open the status page | Not applicable now: this app has no UI. Keep it for the Selenium stage | UI | Medium | Not run | Yes: no UI in the practice app |
